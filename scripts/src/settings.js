@@ -12,10 +12,13 @@ import { colours } from './constants';
 let _settings = {
   fps: 45,
   actionTimeoutLimit: 2,
+  renderMode: 'orthographic',
   terrain: {
     tileSize: 20,
     tilesWide: 50,
     tilesHigh: 28,
+    isoTileWidth: 40,
+    isoTileHeight: 40,
   },
   character: {
     spriteSize: 40,

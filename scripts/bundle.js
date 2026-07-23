@@ -159,10 +159,13 @@ var Paradise = (function (exports) {
   let _settings = {
     fps: 45,
     actionTimeoutLimit: 2,
+    renderMode: 'orthographic',
     terrain: {
       tileSize: 20,
       tilesWide: 50,
       tilesHigh: 28,
+      isoTileWidth: 40,
+      isoTileHeight: 40,
     },
     character: {
       spriteSize: 40,
@@ -899,16 +902,61 @@ var Paradise = (function (exports) {
       this.player.advanceFrame();
     }
 
+    isIsometric() {
+      return settings.get('renderMode') === 'isometric';
+    }
+
+    projectTileToScreen(x, y) {
+      const terrain = settings.get('terrain');
+      return {
+        x: (x - y) * terrain.isoTileWidth / 2,
+        y: (x + y) * terrain.isoTileHeight / 4,
+      };
+    }
+
+    getRenderOffsets() {
+      const terrain = settings.get('terrain');
+      const tileStep = settings.tileStep();
+      const centerPoint = this.game.centerPoint;
+      const player = this.player;
+
+      if (this.isIsometric()) {
+        const projected = this.projectTileToScreen(player.x, player.y);
+        return {
+          offsetX: projected.x - centerPoint.x,
+          offsetY: projected.y - centerPoint.y,
+          playerOffsetX: (player.stepX - player.stepY) * tileStep,
+          playerOffsetY: (player.stepX + player.stepY) * tileStep / 2,
+          tileStep,
+        };
+      }
+
+      return {
+        offsetX: player.x * terrain.tileSize - centerPoint.x,
+        offsetY: player.y * terrain.tileSize - centerPoint.y,
+        playerOffsetX: player.stepX * tileStep,
+        playerOffsetY: player.stepY * tileStep,
+        tileStep,
+      };
+    }
+
     draw(ctx) {
       const terrain = settings.get('terrain');
       this.game.redraw = true;
 
-      this.offsetX = this.player.x * terrain.tileSize - this.game.centerPoint.x;
-      this.offsetY = this.player.y * terrain.tileSize - this.game.centerPoint.y;
-      this.viewportStartX = this.player.x - terrain.tilesWide / 2;
-      this.viewportStartY = this.player.y - terrain.tilesHigh / 2;
+      const offsets = this.getRenderOffsets();
+      this.offsetX = offsets.offsetX;
+      this.offsetY = offsets.offsetY;
+      this.playerOffsetX = offsets.playerOffsetX;
+      this.playerOffsetY = offsets.playerOffsetY;
 
-      this.drawLocale(ctx);
+      if (this.isIsometric()) {
+        this.drawIsoLocale(ctx);
+      } else {
+        this.viewportStartX = this.player.x - terrain.tilesWide / 2;
+        this.viewportStartY = this.player.y - terrain.tilesHigh / 2;
+        this.drawLocale(ctx);
+      }
 
       this.drawDecorativeBehindPlayer(ctx);
       this.drawPeople(ctx);
@@ -922,8 +970,16 @@ var Paradise = (function (exports) {
       const character = settings.get('character');
 
       let sprite = this.player.sprite,
-        playerX = this.game.centerPoint.x - terrain.tileSize / 2,
+        playerX,
+        playerY;
+
+      if (this.isIsometric()) {
+        playerX = this.game.centerPoint.x - character.spriteSize / 2;
+        playerY = this.game.centerPoint.y - character.spriteSize / 2;
+      } else {
+        playerX = this.game.centerPoint.x - terrain.tileSize / 2;
         playerY = this.game.centerPoint.y - terrain.tileSize;
+      }
 
       ctx.drawImage(
         sprite.image,
@@ -942,7 +998,7 @@ var Paradise = (function (exports) {
       if (!this.locale || this.game.loading) return;
 
       this.locale.decorative.forEach(decoration => {
-        if (decoration.y > this.player.y && decoration.canWalkBehind) return;
+        if (decoration.canWalkBehind && this.isDecorationInFrontOfPlayer(decoration)) return;
 
         decoration.draw(ctx, this.player, this.offsetX, this.offsetY, this.localeMap);
       });
@@ -952,17 +1008,23 @@ var Paradise = (function (exports) {
       if (!this.locale || this.game.loading) return;
 
       this.locale.decorative.forEach(decoration => {
-        if (decoration.y <= this.player.y || !decoration.canWalkBehind) return;
+        if (!decoration.canWalkBehind || !this.isDecorationInFrontOfPlayer(decoration)) return;
 
         decoration.draw(ctx, this.player, this.offsetX, this.offsetY, this.localeMap);
       });
+    }
+
+    isDecorationInFrontOfPlayer(decoration) {
+      if (this.isIsometric()) {
+        return decoration.x + decoration.y > this.player.x + this.player.y;
+      }
+      return decoration.y > this.player.y;
     }
 
     drawLocale(ctx) {
       if (!this.locale || this.game.loading) return;
 
       const terrainSettings = settings.get('terrain');
-      const tileStep = settings.tileStep();
 
       let viewportStartX = this.viewportStartX - 1,
         viewportStartY = this.viewportStartY - 1;
@@ -984,8 +1046,6 @@ var Paradise = (function (exports) {
           if (typeof terrain !== 'undefined') {
             let tileX = x * terrainSettings.tileSize - this.offsetX,
               tileY = y * terrainSettings.tileSize - this.offsetY,
-              offsetX = this.player.stepX * tileStep,
-              offsetY = this.player.stepY * tileStep,
               tile = window.game.terrainSprites[terrain.image];
 
             if (!tile) {
@@ -993,8 +1053,8 @@ var Paradise = (function (exports) {
               ctx.fillStyle = terrain.colour;
               ctx.strokeStyle = terrain.colour;
               ctx.rect(
-                tileX - offsetX,
-                tileY - offsetY,
+                tileX - this.playerOffsetX,
+                tileY - this.playerOffsetY,
                 terrainSettings.tileSize,
                 terrainSettings.tileSize
               );
@@ -1009,8 +1069,8 @@ var Paradise = (function (exports) {
                   0,
                   45,
                   45,
-                  tileX - offsetX,
-                  tileY - offsetY,
+                  tileX - this.playerOffsetX,
+                  tileY - this.playerOffsetY,
                   terrainSettings.tileSize,
                   terrainSettings.tileSize
                 );
@@ -1023,19 +1083,96 @@ var Paradise = (function (exports) {
       }
     }
 
+    drawIsoLocale(ctx) {
+      if (!this.locale || this.game.loading) return;
+
+      const terrainSettings = settings.get('terrain');
+      const canvasProperties = settings.canvasProperties();
+      const tileW = terrainSettings.isoTileWidth;
+      const tileH = terrainSettings.isoTileHeight;
+      const halfW = tileW / 2;
+      const quarterH = tileH / 4;
+      const offsetX = this.offsetX + this.playerOffsetX;
+      const offsetY = this.offsetY + this.playerOffsetY;
+
+      const minS = Math.floor(offsetY / quarterH) - 2;
+      const maxS = Math.ceil((canvasProperties.height + offsetY) / quarterH) + 2;
+      const minD = Math.floor(offsetX / halfW) - 2;
+      const maxD = Math.ceil((canvasProperties.width + offsetX) / halfW) + 2;
+
+      const startX = Math.max(0, Math.floor((minS + minD) / 2) - 1);
+      const endX = Math.min(this.locale.width - 1, Math.ceil((maxS + maxD) / 2) + 1);
+      const startY = Math.max(0, Math.floor((minS - maxD) / 2) - 1);
+      const endY = Math.min(this.locale.height - 1, Math.ceil((maxS - minD) / 2) + 1);
+
+      for (let s = startX + startY; s <= endX + endY; s++) {
+        const xMin = Math.max(startX, s - endY);
+        const xMax = Math.min(endX, s - startY);
+        for (let x = xMin; x <= xMax; x++) {
+          const y = s - x;
+          let terrain = this.localeMap[x][y];
+          if (typeof terrain === 'undefined') continue;
+
+          const screenX = (x - y) * halfW - offsetX;
+          const screenY = s * quarterH - offsetY;
+          const tile = window.game.terrainSprites[terrain.image];
+
+          if (!tile) {
+            ctx.beginPath();
+            ctx.fillStyle = terrain.colour;
+            ctx.moveTo(screenX, screenY - quarterH);
+            ctx.lineTo(screenX + halfW, screenY);
+            ctx.lineTo(screenX, screenY + quarterH);
+            ctx.lineTo(screenX - halfW, screenY);
+            ctx.closePath();
+            ctx.fill();
+          } else {
+            try {
+              ctx.drawImage(
+                tile,
+                0,
+                0,
+                45,
+                45,
+                screenX - halfW,
+                screenY - quarterH,
+                tileW,
+                tileH / 2
+              );
+            } catch (e) {
+              console.warn(e, tile);
+            }
+          }
+        }
+      }
+    }
+
     drawPeople(ctx) {
       if (this.presentPeople.length === 0) return;
       const terrain = settings.get('terrain');
       const character = settings.get('character');
       const tileStep = settings.tileStep();
 
-      let playerOffsetX = this.player.stepX * tileStep,
-        playerOffsetY = this.player.stepY * tileStep;
+      let playerOffsetX = this.playerOffsetX,
+        playerOffsetY = this.playerOffsetY;
 
       this.presentPeople.forEach(person => {
         let sprite = person.sprite,
-          personX = person.x * terrain.tileSize - this.offsetX - playerOffsetX - terrain.tileSize / 2,
+          personX,
+          personY;
+
+        if (this.isIsometric()) {
+          const projected = this.projectTileToScreen(person.x, person.y);
+          const personOffsetX = (person.stepX - person.stepY) * tileStep;
+          const personOffsetY = (person.stepX + person.stepY) * tileStep / 2;
+          personX = projected.x - this.offsetX - playerOffsetX + personOffsetX - character.spriteSize / 2;
+          personY = projected.y - this.offsetY - playerOffsetY + personOffsetY - character.spriteSize / 2;
+        } else {
+          personX = person.x * terrain.tileSize - this.offsetX - playerOffsetX - terrain.tileSize / 2;
           personY = person.y * terrain.tileSize - this.offsetY - playerOffsetY - terrain.tileSize / 2;
+          personX += person.stepX * tileStep;
+          personY += person.stepY * tileStep;
+        }
 
         ctx.drawImage(
           sprite.image,
@@ -1043,8 +1180,8 @@ var Paradise = (function (exports) {
           sprite.y,
           64,
           64,
-          personX + person.stepX * tileStep,
-          personY + person.stepY * tileStep,
+          personX,
+          personY,
           character.spriteSize,
           character.spriteSize
         );
@@ -1697,18 +1834,38 @@ var Paradise = (function (exports) {
 
     draw(ctx, player, mapOffsetX, mapOffsetY, map) {
       const terrain = settings.get('terrain');
+      const tileStep = settings.tileStep();
+      const isIsometric = settings.get('renderMode') === 'isometric';
 
-      let decorationX = this.x * terrain.tileSize - mapOffsetX,
-        decorationY = this.y * terrain.tileSize - mapOffsetY,
-        offsetX = player.stepX * settings.tileStep(),
-        offsetY = player.stepY * settings.tileStep(),
+      let decorationX,
+        decorationY,
+        offsetX,
+        offsetY,
         height = this.image.naturalHeight; // we draw this from the bottom
 
-      ctx.drawImage(
-        this.image,
-        decorationX - offsetX,
-        decorationY - offsetY - height + terrain.tileSize
-      );
+      if (isIsometric) {
+        const halfW = terrain.isoTileWidth / 2;
+        const quarterH = terrain.isoTileHeight / 4;
+        decorationX = (this.x - this.y) * halfW - mapOffsetX;
+        decorationY = (this.x + this.y) * quarterH - mapOffsetY;
+        offsetX = (player.stepX - player.stepY) * tileStep;
+        offsetY = (player.stepX + player.stepY) * tileStep / 2;
+
+        const tileCenterX = decorationX - offsetX;
+        const tileBottomY = decorationY - offsetY + quarterH;
+        ctx.drawImage(this.image, tileCenterX - this.image.naturalWidth / 2, tileBottomY - height);
+      } else {
+        decorationX = this.x * terrain.tileSize - mapOffsetX;
+        decorationY = this.y * terrain.tileSize - mapOffsetY;
+        offsetX = player.stepX * tileStep;
+        offsetY = player.stepY * tileStep;
+
+        ctx.drawImage(
+          this.image,
+          decorationX - offsetX,
+          decorationY - offsetY - height + terrain.tileSize
+        );
+      }
 
       for (let i = 0; i < this.passMap.length; i++) {
         let mapEntry = map[this.x + i][this.y];
@@ -1716,14 +1873,31 @@ var Paradise = (function (exports) {
         mapEntry.decoration = this;
 
         if (window.debug && !this.passMap[i]) {
-          let debugX = (this.x + i) * terrain.tileSize - mapOffsetX;
+          if (isIsometric) {
+            const halfW = terrain.isoTileWidth / 2;
+            const quarterH = terrain.isoTileHeight / 4;
+            const tx = this.x + i;
+            const tileCenterX = (tx - this.y) * halfW - mapOffsetX - offsetX;
+            const tileCenterY = (tx + this.y) * quarterH - mapOffsetY - offsetY;
 
-          ctx.beginPath();
-          ctx.fillStyle = this.colour;
-          ctx.strokeStyle = this.colour;
-          ctx.rect(debugX - offsetX, decorationY - offsetY, terrain.tileSize, terrain.tileSize);
-          ctx.fill();
-          ctx.stroke();
+            ctx.beginPath();
+            ctx.fillStyle = this.colour;
+            ctx.moveTo(tileCenterX, tileCenterY - quarterH);
+            ctx.lineTo(tileCenterX + halfW, tileCenterY);
+            ctx.lineTo(tileCenterX, tileCenterY + quarterH);
+            ctx.lineTo(tileCenterX - halfW, tileCenterY);
+            ctx.closePath();
+            ctx.fill();
+          } else {
+            let debugX = (this.x + i) * terrain.tileSize - mapOffsetX;
+
+            ctx.beginPath();
+            ctx.fillStyle = this.colour;
+            ctx.strokeStyle = this.colour;
+            ctx.rect(debugX - offsetX, decorationY - offsetY, terrain.tileSize, terrain.tileSize);
+            ctx.fill();
+            ctx.stroke();
+          }
         }
       }
     }
@@ -2435,8 +2609,8 @@ var Paradise = (function (exports) {
    */
 
   class Islands extends Locale {
-    constructor(player, people) {
-      super(player, people);
+    constructor(player, people$$1) {
+      super(player, people$$1);
 
       this.id = 'Islands';
       this.entryPoints.beginningOfGame = { x: 57, y: 60 };
@@ -3123,47 +3297,54 @@ var Paradise = (function (exports) {
     }
   }
 
-  exports.Decorative = Decorative;
-  exports.Dresser = Dresser;
-  exports.Evelyn = Evelyn;
-  exports.Game = Game;
-  exports.Inhabitance = Inhabitance;
-  exports.Interaction = Interaction;
-  exports.Interior = Interior;
-  exports.Item = Item;
-  exports.Jill = Jill;
-  exports.John = John;
-  exports.Locale = Locale;
-  exports.Menu = Menu;
-  exports.Neil = Neil;
-  exports.ObjectInteraction = ObjectInteraction;
-  exports.Pauline = Pauline;
-  exports.Person = Person;
-  exports.Petey = Petey;
-  exports.Player = Player;
-  exports.Portrait = Portrait;
-  exports.Quazar = Quazar;
-  exports.Renderer = Renderer;
-  exports.Rug = Rug;
-  exports.Scene = Scene;
-  exports.Slime = Slime;
+  /*
+   *
+   *  Paradise
+   *  Declan Tyson
+   *  v0.0.72
+   *  21/09/2018
+   *
+   */
+
   exports.StartGame = StartGame;
-  exports.Terrain = Terrain;
-  exports.TestMenu = TestMenu;
-  exports.Tree = Tree;
+  exports.actions = actions;
+  exports.Interaction = Interaction;
+  exports.ObjectInteraction = ObjectInteraction;
+  exports.Item = Item;
+  exports.Locale = Locale;
+  exports.Inhabitance = Inhabitance;
+  exports.Interior = Interior;
+  exports.Player = Player;
+  exports.choosePeople = choosePeople;
+  exports.Person = Person;
+  exports.Scene = Scene;
+  exports.terrains = terrains;
   exports.Util = Util;
   exports.WorldMap = WorldMap;
-  exports.Zenith = Zenith;
-  exports.actions = actions;
-  exports.choosePeople = choosePeople;
-  exports.chooseStartingMap = chooseStartingMap;
-  exports.enemies = enemies;
-  exports.people = people;
+  exports.Decorative = Decorative;
+  exports.Renderer = Renderer;
+  exports.Game = Game;
+  exports.Portrait = Portrait;
   exports.settings = settings;
   exports.startingMaps = startingMaps;
-  exports.terrains = terrains;
-
-  Object.defineProperty(exports, '__esModule', { value: true });
+  exports.chooseStartingMap = chooseStartingMap;
+  exports.people = people;
+  exports.enemies = enemies;
+  exports.Evelyn = Evelyn;
+  exports.Jill = Jill;
+  exports.John = John;
+  exports.Neil = Neil;
+  exports.Pauline = Pauline;
+  exports.Petey = Petey;
+  exports.Quazar = Quazar;
+  exports.Zenith = Zenith;
+  exports.Dresser = Dresser;
+  exports.Rug = Rug;
+  exports.Tree = Tree;
+  exports.Terrain = Terrain;
+  exports.Menu = Menu;
+  exports.TestMenu = TestMenu;
+  exports.Slime = Slime;
 
   return exports;
 
