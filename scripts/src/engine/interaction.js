@@ -35,6 +35,10 @@ class Interaction extends Scene {
     Util.log(`Entering interaction with ${this.person.name}`);
   }
 
+  handlePointer(screenX, screenY) {
+    if (this.worldMap) this.worldMap.handlePointer(screenX, screenY);
+  }
+
   draw(ctx) {
     // World map should be overlaid
     this.worldMap.draw(ctx);
