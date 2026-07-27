@@ -29,6 +29,25 @@ var Paradise = (function (exports) {
     window.game.sendInput(null);
   });
 
+  const handlePointerEvent = e => {
+    if (!window.game || !window.game.scene || !window.game.scene.handlePointer) return;
+
+    const canvas = window.game.renderer.canvas;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    window.game.scene.handlePointer(
+      (clientX - rect.left) * scaleX,
+      (clientY - rect.top) * scaleY
+    );
+  };
+
+  window.addEventListener('mousedown', handlePointerEvent);
+  window.addEventListener('touchstart', handlePointerEvent);
+
   /*
    *
    *  Paradise/Util
@@ -820,6 +839,8 @@ var Paradise = (function (exports) {
 
       this.visitedLocales = {};
       this.presentPeople = [];
+      this.targetX = null;
+      this.targetY = null;
     }
 
     doActions(action) {
@@ -829,6 +850,7 @@ var Paradise = (function (exports) {
         this.player.resetSprite();
         return;
       }
+      if (action !== 'click') this.clearTarget();
       this.checkForRandomEncounters();
       this.checkForEntrance();
     }
@@ -906,6 +928,81 @@ var Paradise = (function (exports) {
       return settings.get('renderMode') === 'isometric';
     }
 
+    screenToGrid(screenX, screenY) {
+      const offsets = this.getRenderOffsets();
+      const totalOffsetX = offsets.offsetX + offsets.playerOffsetX;
+      const totalOffsetY = offsets.offsetY + offsets.playerOffsetY;
+
+      if (this.isIsometric()) {
+        const terrain = settings.get('terrain');
+        const sx = screenX + totalOffsetX;
+        const sy = screenY + totalOffsetY;
+        const x = Math.round(sx / terrain.isoTileWidth + (2 * sy) / terrain.isoTileHeight);
+        const y = Math.round((2 * sy) / terrain.isoTileHeight - sx / terrain.isoTileWidth);
+        return { x, y };
+      }
+
+      const terrain = settings.get('terrain');
+      return {
+        x: Math.floor((screenX + totalOffsetX) / terrain.tileSize),
+        y: Math.floor((screenY + totalOffsetY) / terrain.tileSize),
+      };
+    }
+
+    handlePointer(screenX, screenY) {
+      const grid = this.screenToGrid(screenX, screenY);
+
+      if (
+        grid.x < 0 ||
+        grid.y < 0 ||
+        grid.x >= this.locale.width ||
+        grid.y >= this.locale.height
+      ) {
+        return;
+      }
+
+      if (!this.checkIfTilePassable(grid.x, grid.y)) return;
+
+      this.targetX = grid.x;
+      this.targetY = grid.y;
+    }
+
+    clearTarget() {
+      this.targetX = null;
+      this.targetY = null;
+    }
+
+    updateAutoMovement() {
+      if (this.targetX === null || this.targetY === null) return;
+      if (this.targetX === this.player.x && this.targetY === this.player.y) {
+        this.clearTarget();
+        return;
+      }
+      if (!this.checkIfTilePassable(this.targetX, this.targetY)) {
+        this.clearTarget();
+        return;
+      }
+
+      const dx = this.targetX - this.player.x;
+      const dy = this.targetY - this.player.y;
+
+      if (dx !== 0) {
+        const desired = dx > 0 ? directions.right : directions.left;
+        if (this.player.direction !== desired) {
+          this.player.setDirection(desired);
+        } else {
+          dx > 0 ? this.moveRight() : this.moveLeft();
+        }
+      } else if (dy !== 0) {
+        const desired = dy > 0 ? directions.down : directions.up;
+        if (this.player.direction !== desired) {
+          this.player.setDirection(desired);
+        } else {
+          dy > 0 ? this.moveDown() : this.moveUp();
+        }
+      }
+    }
+
     projectTileToScreen(x, y) {
       const terrain = settings.get('terrain');
       return {
@@ -949,6 +1046,8 @@ var Paradise = (function (exports) {
       this.offsetY = offsets.offsetY;
       this.playerOffsetX = offsets.playerOffsetX;
       this.playerOffsetY = offsets.playerOffsetY;
+
+      this.updateAutoMovement();
 
       if (this.isIsometric()) {
         this.drawIsoLocale(ctx);
@@ -2065,6 +2164,10 @@ var Paradise = (function (exports) {
       Util.log(`Entering interaction with ${this.person.name}`);
     }
 
+    handlePointer(screenX, screenY) {
+      if (this.worldMap) this.worldMap.handlePointer(screenX, screenY);
+    }
+
     draw(ctx) {
       // World map should be overlaid
       this.worldMap.draw(ctx);
@@ -2214,7 +2317,7 @@ var Paradise = (function (exports) {
    *
    *  Paradise/Person
    *  Declan Tyson
-   *  v0.0.94
+   *  v0.0.95
    *  21/10/2019
    *
    */
@@ -3267,6 +3370,11 @@ var Paradise = (function (exports) {
       });
 
       this.addMenuItem('random', 'Start with test data', () => {
+        this.startGame('Islands', ['Zenith', 'Quazar', 'Jill', 'John']);
+      });
+
+      this.addMenuItem('isometric', 'Start in isometric mode', () => {
+        settings.set('renderMode', 'isometric');
         this.startGame('Islands', ['Zenith', 'Quazar', 'Jill', 'John']);
       });
 

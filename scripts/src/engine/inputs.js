@@ -25,3 +25,22 @@ window.addEventListener('keyup', e => {
   if (!window.game) return;
   window.game.sendInput(null);
 });
+
+const handlePointerEvent = e => {
+  if (!window.game || !window.game.scene || !window.game.scene.handlePointer) return;
+
+  const canvas = window.game.renderer.canvas;
+  const rect = canvas.getBoundingClientRect();
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+
+  window.game.scene.handlePointer(
+    (clientX - rect.left) * scaleX,
+    (clientY - rect.top) * scaleY
+  );
+};
+
+window.addEventListener('mousedown', handlePointerEvent);
+window.addEventListener('touchstart', handlePointerEvent);

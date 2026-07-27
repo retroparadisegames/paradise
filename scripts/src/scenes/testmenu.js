@@ -37,6 +37,11 @@ class TestMenu extends Menu {
       this.startGame('Islands', ['Zenith', 'Quazar', 'Jill', 'John']);
     });
 
+    this.addMenuItem('isometric', 'Start in isometric mode', () => {
+      settings.set('renderMode', 'isometric');
+      this.startGame('Islands', ['Zenith', 'Quazar', 'Jill', 'John']);
+    });
+
     this.addMenuItem('random', 'Start in full debug mode', () => {
       window.debug = true;
       this.startGame('Islands', ['Zenith', 'Quazar', 'Jill', 'John']);
