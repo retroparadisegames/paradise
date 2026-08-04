@@ -1,4 +1,5 @@
 # 002 · Dating Page — Fix 3-way chat rendering and persist matches between sessions
+**Status:** wontfix
 
 ## Context
 
