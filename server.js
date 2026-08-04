@@ -3,6 +3,9 @@ var http = require('http'),
     express = require('express'),
     app = express();
 
+const { preflight } = require('./preflight');
+
+app.use(express.json());
 
 app.use("/css", express.static('css'));
 app.use("/img", express.static('img'));
@@ -18,6 +21,11 @@ app.get('/demo', (req,res) => {
         }
         res.end(content);
     });
+});
+
+app.post('/api/preflight', (req, res) => {
+    const message = req.body && typeof req.body.message === 'string' ? req.body.message : '';
+    res.json(preflight(message));
 });
 
 http.createServer(app).listen(9999);
